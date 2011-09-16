@@ -240,15 +240,15 @@ ssize_t sendfile(int out_fd, int in_fd, off_t *offset, size_t count)
 		if (rest > pagecache_flush_interval)
 			rest = pagecache_flush_interval;
 		ret = libc_sendfile(out_fd, in_fd, offset, rest);
-		if (ret > 0) {
-			processed += ret;
-			fd_touched_bytes(in_fd, ret);
-			fd_touched_bytes(out_fd, ret);
-		}
-		else if (!processed) {
-			processed = ret;
+		if (ret <= 0) { // error, EOF or interrupted syscall
+			if (processed == 0)
+				processed = ret;
 			break;
 		}
+
+		processed += ret;
+		fd_touched_bytes(in_fd, ret);
+		fd_touched_bytes(out_fd, ret);
 	};
 	return processed;
 }
