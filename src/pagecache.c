@@ -36,7 +36,7 @@ struct fd_status {
 
 
 static pthread_mutex_t realloc_mutex = PTHREAD_MUTEX_INITIALIZER;
-static unsigned int pagecache_flush_interval = 1024*1024; // default 1MB
+static unsigned int pagecache_flush_interval = 1024 * 1024; // default 1MB
 
 static int (*libc_close)(int fd);
 static int (*libc_dup2)(int oldfd, int newfd);
@@ -233,7 +233,8 @@ size_t fread_unlocked(void *ptr, size_t size, size_t nmemb, FILE *stream)
 
 ssize_t sendfile(int out_fd, int in_fd, off_t *offset, size_t count)
 {
-	ssize_t processed=0;
+	ssize_t processed = 0;
+
 	while (processed < count) {
 		ssize_t ret;
 		size_t rest = count - processed;
@@ -249,7 +250,8 @@ ssize_t sendfile(int out_fd, int in_fd, off_t *offset, size_t count)
 		processed += ret;
 		fd_touched_bytes(in_fd, ret);
 		fd_touched_bytes(out_fd, ret);
-	};
+	}
+
 	return processed;
 }
 
