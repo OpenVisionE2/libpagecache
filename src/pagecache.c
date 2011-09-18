@@ -34,7 +34,6 @@ struct fd_status {
 	unsigned int bytes;
 };
 
-
 static pthread_mutex_t realloc_mutex = PTHREAD_MUTEX_INITIALIZER;
 static unsigned int pagecache_flush_interval = 1024 * 1024; // default 1MB
 
@@ -50,27 +49,7 @@ static ssize_t (*libc_pwrite)(int fd, const void *buf, size_t count, off_t offse
 static ssize_t (*libc_read)(int fd, void *buf, size_t count);
 static ssize_t (*libc_write)(int fd, const void *buf, size_t count);
 static ssize_t (*libc_sendfile)(int out_fd, int in_fd, off_t *offset, size_t count);
-
-static void initialize_globals(void) __attribute__ ((constructor));
-static void initialize_globals(void)
-{
-	char *e = getenv("PAGECACHE_FLUSH_INTERVAL");
-	if (e != NULL)
-		pagecache_flush_interval = strtoul(e, NULL, 10);
-
-	libc_close = find_symbol("close");
-	libc_dup2 = find_symbol("dup2");
-	libc_fclose = find_symbol("fclose");
-	libc_fread = find_symbol("fread");
-	libc_fread_unlocked = find_symbol("fread_unlocked");
-	libc_fwrite = find_symbol("fwrite");
-	libc_fwrite_unlocked = find_symbol("fwrite_unlocked");
-	libc_pread = find_symbol("pread");
-	libc_pwrite = find_symbol("pwrite");
-	libc_read = find_symbol("read");
-	libc_write = find_symbol("write");
-	libc_sendfile = find_symbol("sendfile");
-}
+static void *(*libc_dlsym)(void *hnd, const char *sym);
 
 static struct fd_status *get_fd_status(int fd)
 {
@@ -167,71 +146,63 @@ static void file_pre_close(FILE *fp)
  * syscall interface
  */
 
-ssize_t write(int fd, const void *buf, size_t count)
+ssize_t pagecache_write(int fd, const void *buf, size_t count)
 {
 	ssize_t ret = libc_write(fd, buf, count);
 	fd_touched_bytes(fd, ret);
 	return ret;
 }
 
-ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset)
+ssize_t pagecache_pwrite(int fd, const void *buf, size_t count, off_t offset)
 {
 	ssize_t ret = libc_pwrite(fd, buf, count, offset);
 	fd_touched_bytes(fd, ret);
 	return ret;
 }
 
-size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream)
+size_t pagecache_fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream)
 {
 	size_t ret = libc_fwrite(ptr, size, nmemb, stream);
 	file_touched_bytes(size, ret, stream);
 	return ret;
 }
 
-#ifdef fwrite_unlocked
-#undef fwrite_unlocked
-#endif
-
-size_t fwrite_unlocked(const void *ptr, size_t size, size_t nmemb, FILE *stream)
+size_t pagecache_fwrite_unlocked(const void *ptr, size_t size, size_t nmemb, FILE *stream)
 {
 	size_t ret = libc_fwrite_unlocked(ptr, size, nmemb, stream);
 	file_touched_bytes(size, ret, stream);
 	return ret;
 }
 
-ssize_t read(int fd, void *buf, size_t count)
+ssize_t pagecache_read(int fd, void *buf, size_t count)
 {
 	ssize_t ret = libc_read(fd, buf, count);
 	fd_touched_bytes(fd, ret);
 	return ret;
 }
 
-ssize_t pread(int fd, void *buf, size_t count, off_t offset)
+ssize_t pagecache_pread(int fd, void *buf, size_t count, off_t offset)
 {
 	ssize_t ret = libc_pread(fd, buf, count, offset);
 	fd_touched_bytes(fd, ret);
 	return ret;
 }
 
-size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream)
+size_t pagecache_fread(void *ptr, size_t size, size_t nmemb, FILE *stream)
 {
 	size_t ret = libc_fread(ptr, size, nmemb, stream);
 	file_touched_bytes(size, ret, stream);
 	return ret;
 }
 
-#ifdef fread_unlocked
-#undef fread_unlocked
-#endif
-
-size_t fread_unlocked(void *ptr, size_t size, size_t nmemb, FILE *stream)
+size_t pagecache_fread_unlocked(void *ptr, size_t size, size_t nmemb, FILE *stream)
 {
 	size_t ret = libc_fread_unlocked(ptr, size, nmemb, stream);
 	file_touched_bytes(size, ret, stream);
 	return ret;
 }
 
-ssize_t sendfile(int out_fd, int in_fd, off_t *offset, size_t count)
+ssize_t pagecache_sendfile(int out_fd, int in_fd, off_t *offset, size_t count)
 {
 	ssize_t processed = 0;
 
@@ -255,21 +226,63 @@ ssize_t sendfile(int out_fd, int in_fd, off_t *offset, size_t count)
 	return processed;
 }
 
-int fclose(FILE *fp)
+int pagecache_fclose(FILE *fp)
 {
 	file_pre_close(fp);
 	return libc_fclose(fp);
 }
 
-int close(int fd)
+int pagecache_close(int fd)
 {
 	fd_pre_close(fd);
 	return libc_close(fd);
 }
 
-int dup2(int oldfd, int newfd)
+int pagecache_dup2(int oldfd, int newfd)
 {
 	if ((oldfd >= 0) && (newfd != oldfd))
 		fd_pre_close(newfd);
 	return libc_dup2(oldfd, newfd);
 }
+
+static void initialize_globals(void) __attribute__ ((constructor));
+static void initialize_globals(void)
+{
+	char *e = getenv("PAGECACHE_FLUSH_INTERVAL");
+	if (e != NULL)
+		pagecache_flush_interval = strtoul(e, NULL, 10);
+
+	libc_close = find_symbol(NULL, "close", pagecache_close);
+	libc_dup2 = find_symbol(NULL, "dup2", pagecache_dup2);
+	libc_fclose = find_symbol(NULL, "fclose", pagecache_fclose);
+	libc_fread = find_symbol(NULL, "fread", pagecache_fread);
+	libc_fread_unlocked = find_symbol(NULL, "fread_unlocked", pagecache_fread_unlocked);
+	libc_fwrite = find_symbol(NULL, "fwrite", pagecache_fwrite);
+	libc_fwrite_unlocked = find_symbol(NULL, "fwrite_unlocked", pagecache_fwrite_unlocked);
+	libc_pread = find_symbol(NULL, "pread", pagecache_pread);
+	libc_pwrite = find_symbol(NULL, "pwrite", pagecache_pwrite);
+	libc_read = find_symbol(NULL, "read", pagecache_read);
+	libc_write = find_symbol(NULL, "write", pagecache_write);
+	libc_sendfile = find_symbol(NULL, "sendfile", pagecache_sendfile);
+}
+
+#ifdef fread_unlocked
+#undef fread_unlocked
+#endif
+
+#ifdef fwrite_unlocked
+#undef fwrite_unlocked
+#endif
+
+ssize_t write(int fd, const void *buf, size_t count) __attribute__ ((weak, alias ("pagecache_write")));
+ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset) __attribute__ ((weak, alias ("pagecache_pwrite")));
+size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) __attribute__ ((weak, alias ("pagecache_fwrite")));
+size_t fwrite_unlocked(const void *ptr, size_t size, size_t nmemb, FILE *stream) __attribute__ ((weak, alias ("pagecache_fwrite_unlocked")));
+ssize_t read(int fd, void *buf, size_t count) __attribute__ ((weak, alias ("pagecache_read")));
+ssize_t pread(int fd, void *buf, size_t count, off_t offset) __attribute__ ((weak, alias ("pagecache_pread")));
+size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream) __attribute__ ((weak, alias ("pagecache_fread")));
+size_t fread_unlocked(void *ptr, size_t size, size_t nmemb, FILE *stream) __attribute__ ((weak, alias ("pagecache_fread_unlocked")));
+ssize_t sendfile(int out_fd, int in_fd, off_t *offset, size_t count) __attribute__ ((weak, alias ("pagecache_sendfile")));
+int fclose(FILE *fp) __attribute__ ((weak, alias ("pagecache_fclose")));
+int close(int fd) __attribute__ ((weak, alias ("pagecache_close")));
+int dup2(int oldfd, int newfd) __attribute__ ((weak, alias ("pagecache_dup2")));
