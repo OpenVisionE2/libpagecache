@@ -83,7 +83,7 @@ static void inspect_fd(int fd, struct fd_status *fds)
 	struct stat stat_buf;
 
 	if (fstat(fd, &stat_buf))
-		abort();
+		return;
 	fds->bytes = 0;
 	if (S_ISREG(stat_buf.st_mode) || S_ISBLK(stat_buf.st_mode))
 		fds->state = FDS_ACTIVE;
