@@ -37,6 +37,15 @@ struct fd_status {
 static pthread_mutex_t realloc_mutex = PTHREAD_MUTEX_INITIALIZER;
 static unsigned int pagecache_flush_interval = 1024 * 1024; // default 1MB
 
+static void initialize_globals(void);
+
+#define CALL(func, ...) __extension__ \
+({ \
+	if (!func) \
+		initialize_globals(); \
+	func(__VA_ARGS__); \
+})
+
 static int (*libc_close)(int fd);
 static int (*libc_dup2)(int oldfd, int newfd);
 static int (*libc_fclose)(FILE *fp);
@@ -153,7 +162,7 @@ static void file_pre_close(FILE *fp)
 
 ssize_t pagecache_write(int fd, const void *buf, size_t count)
 {
-	ssize_t ret = libc_write(fd, buf, count);
+	ssize_t ret = CALL(libc_write, fd, buf, count);
 	fd_touched_bytes(fd, ret);
 	return ret;
 }
@@ -161,7 +170,7 @@ ssize_t pagecache_write(int fd, const void *buf, size_t count)
 #if !defined(__USE_FILE_OFFSET64) || !defined(__REDIRECT)
 ssize_t pagecache_pwrite(int fd, const void *buf, size_t count, off_t offset)
 {
-	ssize_t ret = libc_pwrite(fd, buf, count, offset);
+	ssize_t ret = CALL(libc_pwrite, fd, buf, count, offset);
 	fd_touched_bytes(fd, ret);
 	return ret;
 }
@@ -169,28 +178,28 @@ ssize_t pagecache_pwrite(int fd, const void *buf, size_t count, off_t offset)
 
 ssize_t pagecache_pwrite64(int fd, const void *buf, size_t count, off64_t offset)
 {
-	ssize_t ret = libc_pwrite64(fd, buf, count, offset);
+	ssize_t ret = CALL(libc_pwrite64, fd, buf, count, offset);
 	fd_touched_bytes(fd, ret);
 	return ret;
 }
 
 size_t pagecache_fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream)
 {
-	size_t ret = libc_fwrite(ptr, size, nmemb, stream);
+	size_t ret = CALL(libc_fwrite, ptr, size, nmemb, stream);
 	file_touched_bytes(size, ret, stream);
 	return ret;
 }
 
 size_t pagecache_fwrite_unlocked(const void *ptr, size_t size, size_t nmemb, FILE *stream)
 {
-	size_t ret = libc_fwrite_unlocked(ptr, size, nmemb, stream);
+	size_t ret = CALL(libc_fwrite_unlocked, ptr, size, nmemb, stream);
 	file_touched_bytes(size, ret, stream);
 	return ret;
 }
 
 ssize_t pagecache_read(int fd, void *buf, size_t count)
 {
-	ssize_t ret = libc_read(fd, buf, count);
+	ssize_t ret = CALL(libc_read, fd, buf, count);
 	fd_touched_bytes(fd, ret);
 	return ret;
 }
@@ -198,7 +207,7 @@ ssize_t pagecache_read(int fd, void *buf, size_t count)
 #if !defined(__USE_FILE_OFFSET64) || !defined(__REDIRECT)
 ssize_t pagecache_pread(int fd, void *buf, size_t count, off_t offset)
 {
-	ssize_t ret = libc_pread(fd, buf, count, offset);
+	ssize_t ret = CALL(libc_pread, fd, buf, count, offset);
 	fd_touched_bytes(fd, ret);
 	return ret;
 }
@@ -206,21 +215,21 @@ ssize_t pagecache_pread(int fd, void *buf, size_t count, off_t offset)
 
 ssize_t pagecache_pread64(int fd, void *buf, size_t count, off64_t offset)
 {
-	ssize_t ret = libc_pread64(fd, buf, count, offset);
+	ssize_t ret = CALL(libc_pread64, fd, buf, count, offset);
 	fd_touched_bytes(fd, ret);
 	return ret;
 }
 
 size_t pagecache_fread(void *ptr, size_t size, size_t nmemb, FILE *stream)
 {
-	size_t ret = libc_fread(ptr, size, nmemb, stream);
+	size_t ret = CALL(libc_fread, ptr, size, nmemb, stream);
 	file_touched_bytes(size, ret, stream);
 	return ret;
 }
 
 size_t pagecache_fread_unlocked(void *ptr, size_t size, size_t nmemb, FILE *stream)
 {
-	size_t ret = libc_fread_unlocked(ptr, size, nmemb, stream);
+	size_t ret = CALL(libc_fread_unlocked, ptr, size, nmemb, stream);
 	file_touched_bytes(size, ret, stream);
 	return ret;
 }
@@ -234,7 +243,7 @@ ssize_t pagecache_sendfile(int out_fd, int in_fd, off_t *offset, size_t count)
 		size_t rest = count - processed;
 		if (rest > pagecache_flush_interval)
 			rest = pagecache_flush_interval;
-		ret = libc_sendfile(out_fd, in_fd, offset, rest);
+		ret = CALL(libc_sendfile, out_fd, in_fd, offset, rest);
 		if (ret <= 0) { // error, EOF or interrupted syscall
 			if (processed == 0)
 				processed = ret;
@@ -252,23 +261,22 @@ ssize_t pagecache_sendfile(int out_fd, int in_fd, off_t *offset, size_t count)
 int pagecache_fclose(FILE *fp)
 {
 	file_pre_close(fp);
-	return libc_fclose(fp);
+	return CALL(libc_fclose, fp);
 }
 
 int pagecache_close(int fd)
 {
 	fd_pre_close(fd);
-	return libc_close(fd);
+	return CALL(libc_close, fd);
 }
 
 int pagecache_dup2(int oldfd, int newfd)
 {
 	if ((oldfd >= 0) && (newfd != oldfd))
 		fd_pre_close(newfd);
-	return libc_dup2(oldfd, newfd);
+	return CALL(libc_dup2, oldfd, newfd);
 }
 
-static void initialize_globals(void) __attribute__ ((constructor));
 static void initialize_globals(void)
 {
 	char *e = getenv("PAGECACHE_FLUSH_INTERVAL");
