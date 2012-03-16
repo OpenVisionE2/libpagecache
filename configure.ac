@@ -3,7 +3,7 @@
 
 AC_INIT([libpagecache], [0.0.1], [enigma2-devel@lists.elitedvb.net])
 AM_INIT_AUTOMAKE([dist-bzip2 foreign no-define tar-pax -Wno-portability])
-AC_CONFIG_SRCDIR([src/symbol.c])
+AC_CONFIG_SRCDIR([src/pagecache.c])
 AC_CONFIG_HEADERS([libpagecache-config.h])
 
 # Silent rules are available since 1.11, but older versions
@@ -20,11 +20,11 @@ AC_CONFIG_MACRO_DIR([m4])
 AC_PROG_CC
 
 # Checks for libraries.
-AC_SEARCH_LIBS([dlopen], [dl])
 AX_PTHREAD
 
 # Checks for header files.
 AC_CHECK_HEADERS([fcntl.h limits.h stdlib.h string.h unistd.h])
+PKG_CHECK_MODULES(LIBDLSYM, [libdlsym])
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_TYPE_OFF_T

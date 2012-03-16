@@ -21,7 +21,8 @@
 #include <unistd.h>
 #include <limits.h>
 #include <pthread.h>
-#include "symbol.h"
+
+extern void *find_symbol(void *hdn, const char *symbol, void *repl);
 
 enum fd_state {
 	FDS_UNKNOWN = 0,	/* We know nothing about this fd */
@@ -37,6 +38,7 @@ struct fd_status {
 static pthread_mutex_t realloc_mutex = PTHREAD_MUTEX_INITIALIZER;
 static unsigned int pagecache_flush_interval = 1024 * 1024; // default 1MB
 
+static void initialize_globals_ctor(void) __attribute__ ((constructor));
 static void initialize_globals(void);
 
 #define CALL(func, ...) __extension__ \
@@ -277,8 +279,15 @@ int pagecache_dup2(int oldfd, int newfd)
 	return CALL(libc_dup2, oldfd, newfd);
 }
 
+static void initialize_globals_ctor(void)
+{
+	initialize_globals();
+}
+
 static void initialize_globals(void)
 {
+	if (libc_close)
+		return;
 	char *e = getenv("PAGECACHE_FLUSH_INTERVAL");
 	if (e != NULL)
 		pagecache_flush_interval = strtoul(e, NULL, 10);
