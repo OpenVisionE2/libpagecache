@@ -96,8 +96,10 @@ static void inspect_fd(int fd, struct fd_status *fds)
 	if (fstat(fd, &stat_buf))
 		return;
 	fds->bytes = 0;
-	if (S_ISREG(stat_buf.st_mode) || S_ISBLK(stat_buf.st_mode))
+	if ((S_ISREG(stat_buf.st_mode) || S_ISBLK(stat_buf.st_mode)) && !(fcntl(fd, F_GETFL) & O_DIRECT)) {
+		posix_fadvise(fd, 0, 0, POSIX_FADV_RANDOM);
 		fds->state = FDS_ACTIVE;
+	}
 	else
 		fds->state = FDS_IGNORE;
 }
@@ -139,9 +141,13 @@ static void fd_pre_close(int fd)
 		return;
 
 	fds = get_fd_status(fd);
-	sync_file_range(fd, 0, LONG_LONG_MAX,
-		SYNC_FILE_RANGE_WRITE | SYNC_FILE_RANGE_WAIT_AFTER);
-	posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED);
+
+	if (fds->state == FDS_ACTIVE) {
+		sync_file_range(fd, 0, LONG_LONG_MAX,
+			SYNC_FILE_RANGE_WRITE | SYNC_FILE_RANGE_WAIT_AFTER);
+		posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED);
+	}
+
 	fds->state = FDS_UNKNOWN;
 }
 
