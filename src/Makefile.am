@@ -5,4 +5,6 @@ lib_LTLIBRARIES = libpagecache.la
 libpagecache_la_SOURCES = \
 	pagecache.c
 
+libpagecache_la_LDFLAGS = -avoid-version -module -shared
+
 libpagecache_la_LIBADD = @LIBDLSYM_LIBS@ @PTHREAD_LIBS@
