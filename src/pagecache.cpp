@@ -7,7 +7,7 @@
  * March, 2007
  *
  * Andreas Monzner <andreas.monzner@dream-property.net>
- * July, 2011
+ * January, 2013
  *
  */
 
@@ -22,7 +22,29 @@
 #include <limits.h>
 #include <pthread.h>
 
+/* Test for gcc >= maj.min, as per __GNUC_PREREQ in glibc */
+#if defined (__GNUC__) && defined (__GNUC_MINOR__)
+#define __GNUC_PREREQ(maj, min) \
+	  ((__GNUC__ << 16) + __GNUC_MINOR__ >= ((maj) << 16) + (min))
+#else
+#define __GNUC_PREREQ(maj, min)  0
+#endif
+
+#include <vector>
+#include <list>
+#if defined(__GXX_EXPERIMENTAL_CXX0X__)
+#include <unordered_map>
+#include <unordered_set>
+#else
+#include <ext/hash_map>
+#include <ext/hash_set>
+#endif
+
+#include <errno.h>
+
+extern "C" {
 extern void *find_symbol(void *hdn, const char *symbol, void *repl);
+};
 
 enum fd_state {
 	FDS_UNKNOWN = 0,	/* We know nothing about this fd */
@@ -30,16 +52,33 @@ enum fd_state {
 	FDS_ACTIVE,		/* We're managing this file's pagecache */
 };
 
-struct fd_status {
+class fd_status {
+public:
 	enum fd_state state;
 	unsigned int bytes;
+	fd_status()
+		:state(FDS_UNKNOWN), bytes(0)
+	{
+	}
 };
 
-static pthread_mutex_t realloc_mutex = PTHREAD_MUTEX_INITIALIZER;
+#if defined(__GXX_EXPERIMENTAL_CXX0X__)
+	#define fdCache std::unordered_map<int, fd_status>
+#elif __GNUC_PREREQ(3,1)
+	#define fdCache __gnu_cxx::hash_map<int, fd_status>
+#else // for older gcc use following
+	#define fdCache std::hash_map<int, fd_status>
+#endif
+
+static pthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER;
 static unsigned int pagecache_flush_interval = 1024 * 1024; // default 1MB
+
+extern "C" {
 
 static void initialize_globals_ctor(void) __attribute__ ((constructor));
 static void initialize_globals(void);
+
+};
 
 #define CALL(func, ...) __extension__ \
 ({ \
@@ -47,6 +86,8 @@ static void initialize_globals(void);
 		initialize_globals(); \
 	func(__VA_ARGS__); \
 })
+
+extern "C" {
 
 static int (*libc_close)(int fd);
 static int (*libc_dup2)(int oldfd, int newfd);
@@ -65,29 +106,25 @@ static ssize_t (*libc_write)(int fd, const void *buf, size_t count);
 static ssize_t (*libc_sendfile)(int out_fd, int in_fd, off_t *offset, size_t count);
 static void *(*libc_dlsym)(void *hnd, const char *sym);
 
-static struct fd_status *get_fd_status(int fd)
+};
+
+static fd_status *get_fd_status(int fd)
 {
-	static struct fd_status *fd_status;
-	volatile static int nr_fd_status;	/* Number at *fd_status */
+	static fdCache cache;
 
-	if (fd + 1 > nr_fd_status) {
-		pthread_mutex_lock(&realloc_mutex);
-		if (fd + 1 > nr_fd_status) { // check again.....
-			fd_status = realloc(fd_status, sizeof(*fd_status) * (fd + 1));
-			memset(fd_status + nr_fd_status, 0,
-				sizeof(*fd_status) * (fd + 1 - nr_fd_status));
-			nr_fd_status = fd + 1;
-		}
-		pthread_mutex_unlock(&realloc_mutex);
-	}
+	pthread_mutex_lock(&cache_mutex);
 
-	return &fd_status[fd];
+	fd_status *ret = &cache[fd];
+
+	pthread_mutex_unlock(&cache_mutex);
+
+	return ret;
 }
 
 /*
  * Work out if we're interested in this fd
  */
-static void inspect_fd(int fd, struct fd_status *fds)
+static void inspect_fd(int fd, fd_status *fds)
 {
 	struct stat stat_buf;
 
@@ -104,7 +141,7 @@ static void inspect_fd(int fd, struct fd_status *fds)
 
 static void fd_touched_bytes(int fd, ssize_t count)
 {
-	struct fd_status *fds;
+	fd_status *fds;
 
 	if (pagecache_flush_interval == 0)
 		return;
@@ -131,7 +168,7 @@ static void fd_touched_bytes(int fd, ssize_t count)
 
 static void fd_pre_close(int fd)
 {
-	struct fd_status *fds;
+	fd_status *fds;
 
 	if (pagecache_flush_interval == 0)
 		return;
@@ -162,6 +199,7 @@ static void file_pre_close(FILE *fp)
 		fd_pre_close(fileno(fp));
 }
 
+extern "C" {
 /*
  * syscall interface
  */
@@ -299,21 +337,21 @@ static void initialize_globals(void)
 	if (e != NULL)
 		pagecache_flush_interval = strtoul(e, NULL, 10);
 
-	libc_close = find_symbol(NULL, "close", pagecache_close);
-	libc_dup2 = find_symbol(NULL, "dup2", pagecache_dup2);
-	libc_dup3 = find_symbol(NULL, "dup3", pagecache_dup3);
-	libc_fclose = find_symbol(NULL, "fclose", pagecache_fclose);
-	libc_fread = find_symbol(NULL, "fread", pagecache_fread);
-	libc_fread_unlocked = find_symbol(NULL, "fread_unlocked", pagecache_fread_unlocked);
-	libc_fwrite = find_symbol(NULL, "fwrite", pagecache_fwrite);
-	libc_fwrite_unlocked = find_symbol(NULL, "fwrite_unlocked", pagecache_fwrite_unlocked);
-	libc_pread = find_symbol(NULL, "pread", pagecache_pread);
-	libc_pwrite = find_symbol(NULL, "pwrite", pagecache_pwrite);
-	libc_pread64 = find_symbol(NULL, "pread64", pagecache_pread64);
-	libc_pwrite64 = find_symbol(NULL, "pwrite64", pagecache_pwrite64);
-	libc_read = find_symbol(NULL, "read", pagecache_read);
-	libc_write = find_symbol(NULL, "write", pagecache_write);
-	libc_sendfile = find_symbol(NULL, "sendfile", pagecache_sendfile);
+	libc_close = (int (*)(int)) find_symbol(NULL, "close", (void*)pagecache_close);
+	libc_dup2 = (int (*)(int,int)) find_symbol(NULL, "dup2", (void*)pagecache_dup2);
+	libc_dup3 = (int (*)(int,int,int)) find_symbol(NULL, "dup3", (void*)pagecache_dup3);
+	libc_fclose = (int (*)(FILE *)) find_symbol(NULL, "fclose", (void*)pagecache_fclose);
+	libc_fread = (size_t (*)(void *, size_t, size_t, FILE *)) find_symbol(NULL, "fread", (void*)pagecache_fread);
+	libc_fread_unlocked = (size_t (*)(void *, size_t, size_t, FILE *)) find_symbol(NULL, "fread_unlocked", (void*)pagecache_fread_unlocked);
+	libc_fwrite = (size_t (*)(const void *, size_t, size_t, FILE *)) find_symbol(NULL, "fwrite", (void*)pagecache_fwrite);
+	libc_fwrite_unlocked = (size_t (*)(const void *, size_t, size_t, FILE *)) find_symbol(NULL, "fwrite_unlocked", (void*)pagecache_fwrite_unlocked);
+	libc_pread = (ssize_t (*)(int, void *, size_t, off_t)) find_symbol(NULL, "pread", (void*)pagecache_pread);
+	libc_pwrite = (ssize_t (*)(int, const void *, size_t, off_t)) find_symbol(NULL, "pwrite", (void*)pagecache_pwrite);
+	libc_pread64 = (ssize_t (*)(int, void *, size_t, off64_t)) find_symbol(NULL, "pread64", (void*)pagecache_pread64);
+	libc_pwrite64 = (ssize_t (*)(int, const void *, size_t, off64_t)) find_symbol(NULL, "pwrite64", (void*)pagecache_pwrite64);
+	libc_read = (ssize_t (*)(int, void *, size_t)) find_symbol(NULL, "read", (void*)pagecache_read);
+	libc_write = (ssize_t (*)(int, const void *, size_t)) find_symbol(NULL, "write", (void*)pagecache_write);
+	libc_sendfile = (ssize_t (*)(int, int, off_t*, size_t)) find_symbol(NULL, "sendfile", (void*)pagecache_sendfile);
 }
 
 ssize_t write(int fd, const void *buf, size_t count) __attribute__ ((weak, alias ("pagecache_write")));
@@ -331,3 +369,5 @@ int fclose(FILE *fp) __attribute__ ((weak, alias ("pagecache_fclose")));
 int close(int fd) __attribute__ ((weak, alias ("pagecache_close")));
 int dup2(int oldfd, int newfd) __attribute__ ((weak, alias ("pagecache_dup2")));
 int dup3(int oldfd, int newfd, int flags) __attribute__ ((weak, alias ("pagecache_dup3")));
+
+};
