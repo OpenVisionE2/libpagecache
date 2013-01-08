@@ -1,7 +1,7 @@
 #                                               -*- Autoconf -*-
 # Process this file with autoconf to produce a configure script.
 
-AC_INIT([libpagecache], [0.0.1], [enigma2-devel@lists.elitedvb.net])
+AC_INIT([libpagecache], [0.0.3], [enigma2-devel@lists.elitedvb.net])
 AM_INIT_AUTOMAKE([dist-bzip2 foreign no-define tar-pax -Wno-portability])
 AC_CONFIG_SRCDIR([src/pagecache.c])
 AC_CONFIG_HEADERS([libpagecache-config.h])

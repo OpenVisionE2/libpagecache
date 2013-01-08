@@ -35,6 +35,7 @@ struct fd_status {
 	unsigned int bytes;
 };
 
+static struct fd_status fd_status[4096+1];
 static pthread_mutex_t realloc_mutex = PTHREAD_MUTEX_INITIALIZER;
 static unsigned int pagecache_flush_interval = 1024 * 1024; // default 1MB
 
@@ -67,20 +68,11 @@ static void *(*libc_dlsym)(void *hnd, const char *sym);
 
 static struct fd_status *get_fd_status(int fd)
 {
-	static struct fd_status *fd_status;
-	volatile static int nr_fd_status;	/* Number at *fd_status */
-
-	if (fd + 1 > nr_fd_status) {
-		pthread_mutex_lock(&realloc_mutex);
-		if (fd + 1 > nr_fd_status) { // check again.....
-			fd_status = realloc(fd_status, sizeof(*fd_status) * (fd + 1));
-			memset(fd_status + nr_fd_status, 0,
-				sizeof(*fd_status) * (fd + 1 - nr_fd_status));
-			nr_fd_status = fd + 1;
-		}
-		pthread_mutex_unlock(&realloc_mutex);
+	if (fd > 4095) {
+		fprintf(stderr, "libpagecache broken!!! please report... fd %d requested\n", fd);
+		fflush(stderr);
+		fd = 4096;
 	}
-
 	return &fd_status[fd];
 }
 
@@ -298,6 +290,8 @@ static void initialize_globals(void)
 	char *e = getenv("PAGECACHE_FLUSH_INTERVAL");
 	if (e != NULL)
 		pagecache_flush_interval = strtoul(e, NULL, 10);
+
+	fd_status[4096].state = FDS_IGNORE;
 
 	libc_close = find_symbol(NULL, "close", pagecache_close);
 	libc_dup2 = find_symbol(NULL, "dup2", pagecache_dup2);
