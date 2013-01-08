@@ -1,13 +1,9 @@
-AM_CXXFLAGS = \
-	@PTHREAD_CFLAGS@ \
-	@LIBPAGECACHE_CXXFLAGS@
-
-AM_CPPFLAGS = @LIBPAGECACHE_CPPFLAGS@
+AM_CFLAGS = $(PTHREAD_CFLAGS)
 
 lib_LTLIBRARIES = libpagecache.la
 
 libpagecache_la_SOURCES = \
-	pagecache.cpp
+	pagecache.c
 
 libpagecache_la_LDFLAGS = -avoid-version -module -shared
 
