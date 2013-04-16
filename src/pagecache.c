@@ -310,6 +310,11 @@ static void initialize_globals(void)
 	libc_sendfile = find_symbol(NULL, "sendfile", pagecache_sendfile);
 }
 
+/* When compiling with -O2, glibc uses optimized inline macros,
+   which we need to undefine at this point to avoid a compiler error. */
+#undef fread_unlocked
+#undef fwrite_unlocked
+
 ssize_t write(int fd, const void *buf, size_t count) __attribute__ ((weak, alias ("pagecache_write")));
 ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset) __attribute__ ((weak, alias ("pagecache_pwrite")));
 ssize_t pwrite64(int fd, const void *buf, size_t count, off64_t offset) __attribute__ ((weak, alias ("pagecache_pwrite64")));
