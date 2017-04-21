@@ -66,11 +66,13 @@ static ssize_t (*libc_write)(int fd, const void *buf, size_t count);
 static ssize_t (*libc_sendfile)(int out_fd, int in_fd, off_t *offset, size_t count);
 static void *(*libc_dlsym)(void *hnd, const char *sym);
 
-static struct fd_status *get_fd_status(int fd)
+static struct fd_status *get_fd_status(int fd, int no_debug)
 {
 	if (fd > 4095) {
-		fprintf(stderr, "libpagecache broken!!! please report... fd %d requested\n", fd);
-		fflush(stderr);
+		if (!no_debug) {
+			fprintf(stderr, "libpagecache broken!!! please report... fd %d requested\n", fd);
+			fflush(stderr);
+		}
 		fd = 4096;
 	}
 	return &fd_status[fd];
@@ -105,7 +107,7 @@ static void fd_touched_bytes(int fd, ssize_t count)
 	if (count <= 0)
 		return;
 
-	fds = get_fd_status(fd);
+	fds = get_fd_status(fd, 0);
 
 	if (fds->state == FDS_UNKNOWN)
 		inspect_fd(fd, fds);
@@ -121,7 +123,7 @@ static void fd_touched_bytes(int fd, ssize_t count)
 	}
 }
 
-static void fd_pre_close(int fd)
+static void fd_pre_close(int fd, int no_debug)
 {
 	struct fd_status *fds;
 
@@ -130,7 +132,7 @@ static void fd_pre_close(int fd)
 	if (fd < 0)
 		return;
 
-	fds = get_fd_status(fd);
+	fds = 	get_fd_status(fd, no_debug);
 
 	if (fds->state == FDS_ACTIVE) {
 		sync_file_range(fd, 0, LONG_LONG_MAX,
@@ -151,7 +153,7 @@ static void file_touched_bytes(size_t size, size_t nmemb, FILE *stream)
 static void file_pre_close(FILE *fp)
 {
 	if (fp != NULL)
-		fd_pre_close(fileno(fp));
+		fd_pre_close(fileno(fp), 1);
 }
 
 /*
@@ -260,21 +262,21 @@ int pagecache_fclose(FILE *fp)
 
 int pagecache_close(int fd)
 {
-	fd_pre_close(fd);
+	fd_pre_close(fd, 1);
 	return CALL(libc_close, fd);
 }
 
 int pagecache_dup2(int oldfd, int newfd)
 {
 	if ((oldfd >= 0) && (newfd != oldfd))
-		fd_pre_close(newfd);
+		fd_pre_close(newfd, 0);
 	return CALL(libc_dup2, oldfd, newfd);
 }
 
 int pagecache_dup3(int oldfd, int newfd, int flags)
 {
 	if ((oldfd >= 0) && (newfd != oldfd))
-		fd_pre_close(newfd);
+		fd_pre_close(newfd, 0);
 	return CALL(libc_dup3, oldfd, newfd, flags);
 }
 
